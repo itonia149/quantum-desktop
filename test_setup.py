@@ -28,6 +28,8 @@ class MigrationTests(unittest.TestCase):
             backups=list((h/'.local/state/filebrowser-quantum').glob('package-migration-*/*'))
             self.assertTrue(any(f.read_bytes()==b'database sentinel' for f in backups))
             self.assertIn('/usr/lib/quantum-desktop/filebrowser', (h/'.config/systemd/user/filebrowser-quantum.service').read_text())
+            unit = (h/'.config/systemd/user/filebrowser-quantum.service').read_text()
+            self.assertIn('WorkingDirectory=' + str(h/'.local/share/filebrowser-quantum') + '\n', unit)
 
     def test_new_setup_defaults_read_only(self):
         with tempfile.TemporaryDirectory() as tmp:

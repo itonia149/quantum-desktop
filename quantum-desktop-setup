@@ -70,7 +70,7 @@ def main():
     def quote(value):
         return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
     service.parent.mkdir(parents=True, exist_ok=True)
-    service.write_text('[Unit]\nDescription=FileBrowser Quantum local file manager\n\n[Service]\nExecStart=/usr/lib/quantum-desktop/filebrowser -c ' + quote(configfile) + '\nWorkingDirectory=' + quote(data) + '\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\n')
+    service.write_text('[Unit]\nDescription=FileBrowser Quantum local file manager\n\n[Service]\nExecStart=/usr/lib/quantum-desktop/filebrowser -c ' + quote(configfile) + '\nWorkingDirectory=' + str(data).replace('%', '%%') + '\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\n')
     if desktop.exists():
         desktop.unlink()  # Backed up above; use the package-owned entry.
     subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
