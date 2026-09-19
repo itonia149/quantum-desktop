@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Configure a localhost-only Quantum desktop service or adopt an existing setup."""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import time
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--adopt-config', type=Path, help='Existing JSON-format Quantum configuration to preserve')
+    p.add_argument('--folder', type=Path, action='append', help='Folder to expose; repeat for multiple sources')
+    p.add_argument('--writable', action='store_true', help='Allow modifying files in a new setup')
+    p.add_argument('--port', type=int, default=8085)
+    p.add_argument('--browser', default='microsoft-edge-stable')
+    a = p.parse_args()
+    if os.getuid() == 0:
+        p.error('Run as your desktop user, not root')
+    browser = shutil.which(a.browser)
+    if not browser:
+        p.error('Browser executable not found')
+    home = Path.home()
+    cfgdir = home / '.config/quantum-desktop'
+    configfile = cfgdir / 'config.yaml'
+    data = home / '.local/share/filebrowser-quantum'
+    service = home / '.config/systemd/user/filebrowser-quantum.service'
+    desktop = home / '.local/share/applications/filebrowser-quantum-local.desktop'
+    if a.adopt_config:
+        config = json.loads(a.adopt_config.expanduser().read_text())
+        if config.get('server', {}).get('listen') != '127.0.0.1':
+            p.error('Only localhost configurations can be adopted')
+        if not Path(config['server']['database']).is_absolute():
+            p.error('Adoption requires an absolute database path')
+    else:
+        if configfile.exists() or service.exists():
+            p.error('Existing setup detected; use --adopt-config')
+        if not a.folder:
+            p.error('Supply at least one --folder')
+        sources = []
+        for n, folder in enumerate(a.folder):
+            folder = folder.expanduser().resolve(strict=True)
+            if not folder.is_dir():
+                p.error(f'Not a directory: {folder}')
+            sources.append(dict(name=f'{folder.name or "Filesystem"}-{n+1}', path=str(folder),
+                                config=dict(readOnly=not a.writable, defaultEnabled=True, defaultUserScope='/')))
+        config = dict(server=dict(listen='127.0.0.1', port=a.port, database=str(data/'database.db'),
+                                  cacheDir=str(data/'cache'), disableWebDAV=True, sources=sources),
+                      auth=dict(methods=dict(noauth=True)), frontend=dict(name='Local Files', disableDefaultLinks=True))
+    port = config['server']['port']
+    if not isinstance(port, int) or not 1024 <= port <= 65535:
+        p.error('Port must be between 1024 and 65535')
+    os.umask(0o077)
+    backup = home / '.local/state/filebrowser-quantum' / ('package-migration-' + time.strftime('%Y%m%d-%H%M%S'))
+    backup.mkdir(parents=True)
+    # Stop before backing up the database for a consistent snapshot.
+    subprocess.run(['systemctl', '--user', 'stop', 'filebrowser-quantum.service'], check=False)
+    originals = [service, desktop, configfile, cfgdir/'desktop.json', Path(config['server']['database'])]
+    if a.adopt_config:
+        originals.append(a.adopt_config.expanduser())
+    for n, original in enumerate(originals):
+        if original.exists():
+            shutil.copy2(original, backup / f'{n}-{original.name}')
+    cfgdir.mkdir(parents=True, exist_ok=True)
+    data.mkdir(parents=True, exist_ok=True)
+    configfile.write_text(json.dumps(config, indent=2) + '\n')
+    (cfgdir/'desktop.json').write_text(json.dumps(dict(port=port, browser=browser), indent=2) + '\n')
+    def quote(value):
+        return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
+    service.parent.mkdir(parents=True, exist_ok=True)
+    service.write_text('[Unit]\nDescription=FileBrowser Quantum local file manager\n\n[Service]\nExecStart=/usr/lib/quantum-desktop/filebrowser -c ' + quote(configfile) + '\nWorkingDirectory=' + quote(data) + '\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\n')
+    if desktop.exists():
+        desktop.unlink()  # Backed up above; use the package-owned entry.
+    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
+    subprocess.run(['systemctl', '--user', 'start', 'filebrowser-quantum.service'], check=True)
+    print(f'Ready at http://127.0.0.1:{port}/; migration backup: {backup}')
+
+
+if __name__ == '__main__':
+    main()

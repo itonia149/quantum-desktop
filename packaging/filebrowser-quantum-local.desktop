@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Local Files (Quantum)
+Comment=Browse and manage local files in your browser
+Exec=quantum-desktop
+Icon=system-file-manager
+Terminal=false
+Categories=System;FileManager;
